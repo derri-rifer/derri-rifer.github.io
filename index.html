@@ -2,6 +2,7 @@
 <html dir="rtl" lang="he">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://accounts.google.com https://cdnjs.cloudflare.com; style-src 'unsafe-inline'; img-src 'self' data: blob: https://*.googleusercontent.com https://*.google.com; connect-src https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com https://cdnjs.cloudflare.com http://127.0.0.1:18777; frame-src blob: https://accounts.google.com; media-src blob:; worker-src blob: https://cdnjs.cloudflare.com; child-src blob: https://accounts.google.com; base-uri 'none'; form-action 'none'; object-src 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>לשכה · מערכת עדכונים ומעקב תיקים</title>
@@ -621,7 +622,7 @@ html[data-theme="dark"] .gsteps>div::before{background:var(--gold);color:#221a04
 <footer>
   <span id="footInfo">הנתונים נשמרים מקומית בדפדפן זה בלבד · מומלץ לגבות מדי יום</span>
   <span id="footBackup"></span>
-  <span>לשכה · גרסה 2.0 (ענן גוגל)</span>
+  <span>לשכה · גרסה 2.3 (אבטחה מוקשחת)</span>
 </footer>
 
 <!-- ===== תפריט הקשר ===== -->
@@ -775,6 +776,16 @@ html[data-theme="dark"] .gsteps>div::before{background:var(--gold);color:#221a04
   <div class="dlg-f"><button class="btn" data-close>ביטול</button><button class="btn gold" id="asgSave">שמירה</button></div>
 </dialog>
 
+<!-- ===== דיאלוג קלט (סיסמה) ===== -->
+<dialog id="promptModal">
+  <div class="dlg-h"><i class="ic" data-ic="info"></i><span id="pmTitle">קלט</span></div>
+  <div class="dlg-b">
+    <div class="field"><label for="pmInput" id="pmLabel">ערך</label><input class="inp" id="pmInput" type="text" autocomplete="off"></div>
+    <p class="helper" id="pmHint"></p>
+  </div>
+  <div class="dlg-f"><button class="btn" id="pmCancel">ביטול</button><button class="btn gold" id="pmOk">אישור</button></div>
+</dialog>
+
 <!-- ===== שינוי שם ===== -->
 <dialog id="renameModal">
   <div class="dlg-h"><i class="ic" data-ic="edit"></i> שינוי שם מסמך</div>
@@ -887,6 +898,20 @@ html[data-theme="dark"] .gsteps>div::before{background:var(--gold);color:#221a04
 /* ===================== ליבה: קבועים, אייקונים, כלים ===================== */
 const QS = new URLSearchParams(location.search);
 const TEST = QS.has("smoke") || QS.has("demo") || QS.has("mockgoogle");
+/* הגנת מסגור (Clickjacking): המערכת מסרבת לרוץ מוטמעת בתוך אתר זר */
+(function () {
+  try {
+    if (window.top === window.self) return;
+    const h = location.hostname;
+    if (h.endsWith("claude.ai") || h.includes("claudeusercontent") || h === "127.0.0.1" || h === "localhost") return;
+    try { window.top.location.href = location.href; }
+    catch (e2) {
+      document.addEventListener("DOMContentLoaded", function () {
+        document.body.innerHTML = '<div style="padding:48px;text-align:center;font-family:sans-serif;direction:rtl"><h2>⚠ המערכת נחסמה</h2><p>מטעמי אבטחה אין להטמיע את המערכת בתוך אתר אחר.</p></div>';
+      });
+    }
+  } catch (e) {}
+})();
 // במצב בדיקה בלבד: משאב מושהה שמעכב את אירוע הטעינה עד שהמערכת מוכנה (לצילומי מסך אוטומטיים)
 if (TEST && location.protocol !== "file:") { const _h = new Image(); _h.src = "__hold?" + Math.random(); }
 let DB_NAME = TEST ? "lishka-test" : "lishka-db";
@@ -1101,6 +1126,32 @@ function confirmDlg(title, bodyHtml, okLabel) {
     dlg.addEventListener("cancel", onEsc);
     dlg.showModal();
     $("confirmCancel").focus();
+  });
+}
+
+/* ===== דיאלוג קלט (סיסמה/טקסט) ===== */
+function promptDlg(title, label, opts) {
+  opts = opts || {};
+  return new Promise(res => {
+    $("pmTitle").textContent = title;
+    $("pmLabel").textContent = label;
+    const inp = $("pmInput");
+    inp.type = opts.password ? "password" : "text";
+    inp.value = "";
+    $("pmHint").textContent = opts.hint || "";
+    const dlg = $("promptModal");
+    const done = v => { cleanup(); dlg.close(); res(v); };
+    const ok = () => done(inp.value);
+    const cancel = () => done(null);
+    function onEsc(e) { e.preventDefault(); done(null); }
+    function onKey(e) { if (e.key === "Enter") { e.preventDefault(); ok(); } }
+    function cleanup() { $("pmOk").removeEventListener("click", ok); $("pmCancel").removeEventListener("click", cancel); dlg.removeEventListener("cancel", onEsc); inp.removeEventListener("keydown", onKey); }
+    $("pmOk").addEventListener("click", ok);
+    $("pmCancel").addEventListener("click", cancel);
+    dlg.addEventListener("cancel", onEsc);
+    inp.addEventListener("keydown", onKey);
+    dlg.showModal();
+    setTimeout(() => inp.focus(), 60);
   });
 }
 
@@ -1556,7 +1607,7 @@ function renderDrawerFiles(caseId) {
   const list = S.files.filter(f => f.caseId === caseId);
   $("drFiles").innerHTML = list.length ? list.map(f =>
     '<button class="list-item" data-open-file="' + f.id + '">' +
-    '<span class="fthumb ' + kindCls(f) + '" style="width:36px;height:36px">' + (f.thumb ? '<img src="' + f.thumb + '" alt="">' : ic(kindIcon(f))) + "</span>" +
+    '<span class="fthumb ' + kindCls(f) + '" style="width:36px;height:36px">' + (f.thumb ? '<img src="' + esc(f.thumb) + '" alt="">' : ic(kindIcon(f))) + "</span>" +
     '<span class="grow"><span class="t">' + esc(f.name) + '</span><br><span class="s">' + fmtBytes(f.size) + " · " + fmtDT(f.uploadedAt) + "</span></span>" + ic("eye") + "</button>"
   ).join("") : '<div class="empty" style="padding:14px">אין מסמכים בתיק · אפשר לצרף בכפתור למעלה</div>';
 }
@@ -1828,7 +1879,7 @@ function filteredFiles() {
 function fileRowHtml(f) {
   const c = caseById(f.caseId);
   return '<div class="filerow" role="button" tabindex="0" data-fid="' + f.id + '" aria-label="אפשרויות עבור ' + esc(f.name) + '">' +
-    '<span class="fthumb ' + kindCls(f) + '">' + (f.thumb ? '<img src="' + f.thumb + '" alt="">' : ic(kindIcon(f))) + "</span>" +
+    '<span class="fthumb ' + kindCls(f) + '">' + (f.thumb ? '<img src="' + esc(f.thumb) + '" alt="">' : ic(kindIcon(f))) + "</span>" +
     '<span class="finfo"><span class="fname">' + esc(f.name) +
       (f.starred ? '<span class="fstar" title="מסומן בכוכב">' + ic("star") + "</span>" : "") +
       (f.transcript ? '<span class="tbadge">' + ic("lines") + " תמלול</span>" : "") + "</span>" +
@@ -1918,6 +1969,15 @@ async function downloadFile(id) {
 async function openInTab(id) {
   const f = fileById(id); const blob = await getBlob(id);
   if (!f || !blob) { toast("הקובץ לא נמצא במאגר", { type: "err" }); return; }
+  // אבטחה: קבצים שמסוגלים להריץ קוד בדפדפן (HTML/SVG/XML) יורדים למחשב במקום להיפתח
+  const n = (f.name || "").toLowerCase();
+  const mimes = (blob.type || "") + " " + (f.mime || "");
+  const risky = /\.(html?|xhtml|svg|xml|mht|mhtml)$/.test(n) || /(html|svg|xml)/i.test(mimes);
+  if (risky || kindOf(f) === "oth") {
+    toast("מטעמי אבטחה קובץ מסוג זה יורד למחשב במקום להיפתח בדפדפן");
+    downloadBlob(blob, f.name);
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const w = window.open(url, "_blank");
   if (!w) toast("הדפדפן חסם חלון קופץ — יש לאשר חלונות קופצים", { type: "err" });
@@ -2006,6 +2066,8 @@ function loadPdfJs() {
   pdfjsReady = new Promise((res, rej) => {
     const s = document.createElement("script");
     s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    s.integrity = "sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e"; // נעילת שלמות הרכיב
+    s.crossOrigin = "anonymous";
     const to = setTimeout(() => { pdfjsReady = null; rej(new Error("timeout")); }, 20000);
     s.onload = () => {
       clearTimeout(to);
@@ -2313,7 +2375,7 @@ const gRealApi = {
     let files = [], pageToken = "";
     do {
       const q = encodeURIComponent("appProperties has { key='lishkaApp' and value='1' } and trashed=false");
-      const f = encodeURIComponent("nextPageToken,files(id,name,modifiedTime,appProperties,owners(emailAddress),webViewLink)");
+      const f = encodeURIComponent("nextPageToken,files(id,name,modifiedTime,appProperties,owners(emailAddress),webViewLink,size)");
       const r = await gFetch(DRIVE_API + "/files?q=" + q + "&fields=" + f + "&pageSize=1000" + (pageToken ? "&pageToken=" + pageToken : ""));
       const j = await r.json(); files = files.concat(j.files || []); pageToken = j.nextPageToken || "";
     } while (pageToken);
@@ -2518,6 +2580,48 @@ async function gEnsureFolders(listing) {
     G.docsFolderId = (await r.json()).id;
   } else G.docsFolderId = docs.id;
 }
+/* ===== חיטוי נתונים נכנסים (אבטחה): רק שדות מוכרים, באורכים ובטיפוסים חוקיים ===== */
+function cleanStr(v, max) { return typeof v === "string" ? v.slice(0, max || 2000) : ""; }
+function cleanNum(v) { return typeof v === "number" && isFinite(v) ? v : 0; }
+function cleanEmail(v) { v = cleanStr(v, 160).toLowerCase().trim(); return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) ? v : ""; }
+function httpsOnly(v) { v = cleanStr(v, 600); return /^https:\/\//.test(v) ? v : ""; }
+function gSanitizeCase(c) {
+  if (!c || typeof c !== "object" || !c.id) return null;
+  const st = STATUSES.some(s => s[0] === c.status) ? c.status : "פתוח";
+  const pr = PRIORITIES.some(p => p[0] === c.priority) ? c.priority : "רגילה";
+  const cal = {};
+  if (c.calendar && typeof c.calendar === "object") {
+    Object.keys(c.calendar).slice(0, 30).forEach(k => {
+      const e = c.calendar[k] || {};
+      cal[cleanStr(k, 160)] = { id: cleanStr(e.id, 300), link: httpsOnly(e.link) };
+    });
+  }
+  return {
+    id: cleanStr(c.id, 80), name: cleanStr(c.name, 300), client: cleanStr(c.client, 200), caseNumber: cleanStr(c.caseNumber, 120),
+    type: cleanStr(c.type, 60) || "אחר", status: st, priority: pr,
+    lastUpdate: cleanStr(c.lastUpdate, 4000), lastUpdateAt: cleanNum(c.lastUpdateAt), lastUpdateBy: cleanStr(c.lastUpdateBy, 120),
+    nextTask: cleanStr(c.nextTask, 500), dueDate: /^\d{4}-\d{2}-\d{2}$/.test(c.dueDate || "") ? c.dueDate : "",
+    ownerId: cleanStr(c.ownerId, 160), ownerEmail: cleanEmail(c.ownerEmail), ownerName: cleanStr(c.ownerName, 120),
+    notes: cleanStr(c.notes, 8000), createdAt: cleanNum(c.createdAt), updatedAt: cleanNum(c.updatedAt), updatedBy: cleanStr(c.updatedBy, 120),
+    tagged: Array.isArray(c.tagged) ? c.tagged.map(cleanEmail).filter(Boolean).slice(0, 50) : [],
+    calendar: cal, driveId: cleanStr(c.driveId, 120)
+  };
+}
+function gSanitizeFile(f) {
+  if (!f || typeof f !== "object" || !f.id) return null;
+  return {
+    id: cleanStr(f.id, 80), name: cleanStr(f.name, 300) || "קובץ", mime: cleanStr(f.mime, 120), size: cleanNum(f.size),
+    caseId: cleanStr(f.caseId, 80), transcript: cleanStr(f.transcript, 300000), starred: !!f.starred,
+    uploadedAt: cleanNum(f.uploadedAt), uploadedBy: cleanStr(f.uploadedBy, 120),
+    thumb: (typeof f.thumb === "string" && f.thumb.indexOf("data:image/") === 0) ? f.thumb.slice(0, 150000) : "",
+    updatedAt: cleanNum(f.updatedAt), driveId: cleanStr(f.driveId, 120), webViewLink: httpsOnly(f.webViewLink)
+  };
+}
+function gSanitizeAct(a) {
+  if (!a || typeof a !== "object" || !a.id) return null;
+  return { id: cleanStr(a.id, 80), ts: cleanNum(a.ts), user: cleanStr(a.user, 120), action: cleanStr(a.action, 60), details: cleanStr(a.details, 800), caseId: cleanStr(a.caseId, 80) };
+}
+
 function gWsObj() {
   return { lishkaType: "workspace", updatedAt: Date.now(), settings: { officeName: S.meta.officeName, calAuto: !!S.meta.calAuto }, filesMeta: S.files.filter(f => !f.caseId), activity: S.activity.filter(a => !a.caseId).slice(0, 100) };
 }
@@ -2530,27 +2634,36 @@ async function gMergeWs(ws) {
       await saveMeta();
     }
   }
-  for (const fm of (ws.filesMeta || [])) {
+  for (const rawF of (ws.filesMeta || [])) {
+    const fm = gSanitizeFile(rawF); if (!fm) continue;
     const lf = fileById(fm.id);
     if (!lf) { S.files.push(fm); await dbPut("files", fm); }
     else if ((fm.updatedAt || 0) > (lf.updatedAt || 0)) { Object.assign(lf, fm); await dbPut("files", lf); }
   }
-  for (const a of (ws.activity || [])) if (!S.activity.some(x => x.id === a.id)) { S.activity.push(a); await dbPut("activity", a); }
+  for (const rawA of (ws.activity || [])) { const a = gSanitizeAct(rawA); if (!a) continue; if (!S.activity.some(x => x.id === a.id)) { S.activity.push(a); await dbPut("activity", a); } }
   S.activity.sort((a, b) => b.ts - a.ts);
 }
-function gMergeGrant(obj) {
-  obj.from = (obj.from || "").toLowerCase(); obj.to = (obj.to || "").toLowerCase();
+function gMergeGrant(raw) {
+  const obj = {
+    lishkaType: "grant",
+    from: cleanEmail(raw.from), fromName: cleanStr(raw.fromName, 120),
+    to: cleanEmail(raw.to), toName: cleanStr(raw.toName, 120),
+    status: ["pending", "approved", "declined"].indexOf(raw.status) > -1 ? raw.status : "pending",
+    ts: cleanNum(raw.ts), answeredAt: cleanNum(raw.answeredAt), driveId: raw.driveId
+  };
+  if (!obj.from || !obj.to) return;
   gDirSet(obj.from, obj.fromName); gDirSet(obj.to, obj.toName);
   const i = G.grants.findIndex(x => x.driveId === obj.driveId || gPairKey(x.from, x.to) === gPairKey(obj.from, obj.to));
   if (i > -1) G.grants[i] = obj; else G.grants.push(obj);
 }
 async function gMergeCase(cf, obj) {
-  const inc = obj.case;
-  if (!inc || !inc.id) return;
+  const inc = gSanitizeCase(obj && obj.case);
+  if (!inc) return;
   inc.driveId = cf.id;
-  inc.ownerEmail = (obj.ownerEmail || (cf.owners && cf.owners[0] && cf.owners[0].emailAddress) || "").toLowerCase();
+  // זהות הבעלים נקבעת לפי בעל הקובץ בדרייב (מקור מהימן) — לא לפי הצהרה בתוך תוכן הקובץ
+  inc.ownerEmail = ((cf.owners && cf.owners[0] && cf.owners[0].emailAddress) || obj.ownerEmail || "").toLowerCase();
   inc.ownerId = inc.ownerEmail;
-  if (obj.ownerName) gDirSet(inc.ownerEmail, obj.ownerName, obj.ownerPicture);
+  if (obj.ownerName) gDirSet(inc.ownerEmail, cleanStr(obj.ownerName, 120), httpsOnly(obj.ownerPicture));
   const local = caseById(inc.id);
   if (!local) {
     S.cases.unshift(inc);
@@ -2560,12 +2673,13 @@ async function gMergeCase(cf, obj) {
     Object.assign(local, inc);
     await dbPut("cases", local);
   } else local.driveId = cf.id;
-  for (const fm of (obj.filesMeta || [])) {
+  for (const rawF of (obj.filesMeta || [])) {
+    const fm = gSanitizeFile(rawF); if (!fm) continue;
     const lf = fileById(fm.id);
     if (!lf) { S.files.push(fm); await dbPut("files", fm); }
     else if ((fm.updatedAt || 0) > (lf.updatedAt || 0)) { Object.assign(lf, fm); await dbPut("files", lf); }
   }
-  for (const a of (obj.activity || [])) if (!S.activity.some(x => x.id === a.id)) { S.activity.push(a); await dbPut("activity", a); }
+  for (const rawA of (obj.activity || [])) { const a = gSanitizeAct(rawA); if (!a) continue; if (!S.activity.some(x => x.id === a.id)) { S.activity.push(a); await dbPut("activity", a); } }
 }
 function gSyncUsers() {
   const meE = G.profile.email;
@@ -2598,6 +2712,7 @@ async function gSyncNow(first) {
     const seen = new Set();
     for (const cf of listing.filter(f => gType(f) === "case")) {
       seen.add(cf.id);
+      if (+cf.size > 10485760) continue; // הגנת גודל: קובץ תיק חריג (מעל 10MB) מדולג
       if (G.syncMap[cf.id] === cf.modifiedTime) continue;
       await gMergeCase(cf, await gApi().getJson(cf.id));
       G.syncMap[cf.id] = cf.modifiedTime;
@@ -2790,7 +2905,7 @@ function gRenderDrCal(c) {
   const ex = c.calendar && c.calendar[key];
   $("drCalBtn").textContent = ex ? "עדכון ביומן" : "הוספה ליומן";
   const a = $("drCalLink");
-  if (ex && ex.link) { a.classList.remove("hidden"); a.href = ex.link; } else a.classList.add("hidden");
+  if (ex && ex.link && /^https:\/\//.test(ex.link)) { a.classList.remove("hidden"); a.href = ex.link; } else a.classList.add("hidden");
 }
 function gRenderGrants() {
   if (!G.active) return;
@@ -2910,6 +3025,17 @@ function gWireUi() {
   // ייבוא גיבוי בתוך מצב ענן: דחיפת כל הנתונים שנקלטו לדרייב
   const _importMerge0 = importMerge;
   importMerge = async function (obj, isOnboard) {
+    // חיטוי סכמה לקובץ הגיבוי לפני קליטה — הגנה מקבצים זדוניים/פגומים
+    if (obj && obj.app === "lishka" && !obj.enc) {
+      obj.cases = Array.isArray(obj.cases) ? obj.cases.map(gSanitizeCase).filter(Boolean) : [];
+      obj.files = Array.isArray(obj.files) ? obj.files.map(gSanitizeFile).filter(Boolean) : [];
+      obj.activity = Array.isArray(obj.activity) ? obj.activity.map(gSanitizeAct).filter(Boolean) : [];
+      obj.users = Array.isArray(obj.users) ? obj.users.slice(0, 100).map(u => ({
+        id: cleanStr(u && u.id, 160), name: cleanStr(u && u.name, 120), email: cleanEmail(u && u.email),
+        color: /^#[0-9a-fA-F]{3,8}$/.test((u && u.color) || "") ? u.color : USER_COLORS[0],
+        picture: httpsOnly(u && u.picture)
+      })).filter(u => u.id && u.name) : [];
+    }
     const rep = await _importMerge0(obj, isOnboard);
     if (G.active) {
       toast("דוחף את הנתונים שנקלטו לענן שלך…");
@@ -3343,6 +3469,34 @@ function buildInviteText(name) {
     "בברכה,\n" + me().name + (me().email ? "\n" + me().email : "");
 }
 
+/* ===== הצפנת גיבויים (AES-256-GCM, מפתח מסיסמה ב-PBKDF2) ===== */
+function abToB64(buf) {
+  const u = new Uint8Array(buf); let s = "";
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function b64ToAb(b64) {
+  const bin = atob(b64); const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u.buffer;
+}
+async function deriveKey(pass, salt, iter) {
+  const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: iter, hash: "SHA-256" }, km, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+async function encryptText(str, pass) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(pass, salt, 250000);
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(str));
+  return { app: "lishka", enc: 1, ver: APP_VER, exportedAt: Date.now(), kdfIter: 250000, salt: abToB64(salt.buffer), iv: abToB64(iv.buffer), data: abToB64(ct) };
+}
+async function decryptText(env, pass) {
+  const key = await deriveKey(pass, new Uint8Array(b64ToAb(env.salt)), env.kdfIter || 250000);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(b64ToAb(env.iv)) }, key, b64ToAb(env.data));
+  return new TextDecoder().decode(pt);
+}
+
 /* ===== ייצוא ===== */
 function blobToB64(blob) {
   return new Promise((res, rej) => {
@@ -3382,11 +3536,15 @@ async function exportData(full) {
       if (!ok) return;
     }
   }
+  const pass = await promptDlg("אבטחת קובץ הגיבוי", "סיסמה להצפנת הקובץ (מומלץ) — או להשאיר ריק לקובץ רגיל", { password: true, hint: "מי שמקבל את הקובץ יזדקק לסיסמה בייבוא. אזהרה: סיסמה שאבדה אינה ניתנת לשחזור." });
+  if (pass === null) { toast("הייצוא בוטל"); return; }
   toast(full ? "מכין גיבוי מלא… זה יכול לקחת רגע" : "מכין קובץ נתונים…");
   try {
     const obj = await buildExportObj(full);
-    const blob = new Blob([JSON.stringify(obj)], { type: "application/json" });
-    downloadBlob(blob, "לשכה-" + (full ? "גיבוי-מלא" : "נתונים") + "-" + todayISO() + ".json");
+    let payload = obj, encTag = "";
+    if (pass) { payload = await encryptText(JSON.stringify(obj), pass); encTag = "-מוצפן"; }
+    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+    downloadBlob(blob, "לשכה-" + (full ? "גיבוי-מלא" : "נתונים") + encTag + "-" + todayISO() + ".json");
     S.meta.lastBackup = Date.now(); await saveMeta();
     renderBackupLine();
     logAct("גיבוי", full ? "יוצא גיבוי מלא (" + fmtBytes(blob.size) + ")" : "יוצא קובץ נתונים");
@@ -3595,7 +3753,13 @@ function initShare() {
     e.target.value = ""; e.target.dataset.mode = "";
     if (!file) return;
     try {
-      const obj = JSON.parse(await file.text());
+      let obj = JSON.parse(await file.text());
+      if (obj && obj.enc === 1) {
+        const pw = await promptDlg("קובץ גיבוי מוצפן", "הזינו את סיסמת הקובץ", { password: true });
+        if (pw === null) return;
+        try { obj = JSON.parse(await decryptText(obj, pw)); }
+        catch (de) { toast("סיסמה שגויה או שהקובץ פגום", { type: "err" }); return; }
+      }
       const rep = await importMerge(obj, isOnboard);
       if (isOnboard) {
         $("onboardModal").close();
@@ -3732,6 +3896,12 @@ async function runSmoke() {
     assert("ניסוח עדכון", st.includes("תיק בדיקה אוטומטית") && st.includes("עדכון תיקים"));
     const exp = await buildExportObj(true);
     assert("ייצוא", exp.cases.length === S.cases.length && Object.keys(exp.blobs).length >= 1);
+    const env = await encryptText('{"סוד":"בדיקה"}', "סיסמה123");
+    assert("גיבוי מוצפן אינו חושף תוכן", env.enc === 1 && !JSON.stringify(env).includes("בדיקה"));
+    const rt = await decryptText(env, "סיסמה123");
+    assert("פענוח בסיסמה נכונה", rt.includes("בדיקה"));
+    let rejected = false; try { await decryptText(env, "סיסמה-אחרת"); } catch (e) { rejected = true; }
+    assert("סיסמה שגויה נדחית", rejected);
     switchTab("files"); switchTab("share"); switchTab("dash"); switchTab("cases");
     assert("מעבר לשוניות", document.querySelector("#tab-cases").classList.contains("active"));
     await sleep(300);
